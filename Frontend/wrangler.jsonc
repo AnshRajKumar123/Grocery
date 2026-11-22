@@ -1,8 +1,0 @@
-{
-  "name": "kisan-supermall",
-  "compatibility_date": "2026-11-22",
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "single-page-application"
-  }
-}

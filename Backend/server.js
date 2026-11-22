@@ -1,4 +1,4 @@
-require('dotenv').config(); // MUST BE AT THE VERY TOP
+require('dotenv').config();
 
 const express = require('express');
 const mongoose = require('mongoose');
@@ -11,16 +11,23 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// Fallback to hardcoded string if .env fails to load, preventing crashes during testing
-const mongoURI = process.env.MONGO_URI;
-
 // MongoDB connection
-mongoose.connect(mongoURI)
+mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB Connected Successfully!'))
   .catch(err => console.error('MongoDB Connection Error:', err));
+
+// Health check route
+app.get('/', (req, res) => {
+  res.send('Kisan SuperMall Backend is Live on Vercel!');
+});
 
 // Routes
 app.use('/api/auth', authRoutes);
 
-const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Only listen locally; Vercel handles the server automatically
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 5001;
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}
+
+module.exports = app;

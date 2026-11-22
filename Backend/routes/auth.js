@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const router = express.Router();
 const path = require('path');
+const fs = require('fs');
 const User = require('../models/User');
 const Order = require('../models/Order');
 const Wishlist = require('../models/Wishlist');
@@ -17,15 +18,18 @@ const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:5173").repla
 
 // Rate Limiter for Login
 const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, 
-    max: 3, 
+    windowMs: 15 * 60 * 1000,
+    max: 3,
     message: { message: "Account locked due to too many attempts. Please try again after 15 minutes." }
 });
 
-// Mail Transporter Setup
+// Mail Transporter Setup (Gmail 2-Step App Password)
 const transporter = nodemailer.createTransport({
     service: 'gmail',
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
 });
 
 // Razorpay Instance
@@ -36,10 +40,27 @@ const razorpay = new Razorpay({
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+// Safely attach local logo if present in the bundle
+const getLogoAttachment = () => {
+    const logoPath = path.join(__dirname, '../assets/WebsiteLogo.png');
+    if (fs.existsSync(logoPath)) {
+        return [{
+            filename: 'WebsiteLogo.png',
+            path: logoPath,
+            cid: 'websitelogo',
+            contentDisposition: 'inline'
+        }];
+    }
+    return [];
+};
+
 // ==========================================
-// Helper: Schedule 5-Minute Arrival Reminder
+// Helper: Schedule 5-Minute Arrival Reminder (Local / Always-On Servers)
 // ==========================================
 const scheduleFiveMinReminder = ({ userEmail, orderId, deliveryType, scheduledDate, scheduledTime, trackUrl }) => {
+    // Vercel serverless functions freeze after responding, so skip long timers on Vercel
+    if (process.env.VERCEL) return;
+
     let delayMs = 30 * 60 * 1000; // Standard (35 mins total -> alert at 30 mins)
 
     if (deliveryType === 'Fast') {
@@ -84,19 +105,12 @@ const scheduleFiveMinReminder = ({ userEmail, orderId, deliveryType, scheduledDa
                 </div>
             </div>`;
 
-            transporter.sendMail({
+            await transporter.sendMail({
                 from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
                 to: userEmail,
                 subject: `Arriving in 5 Mins! Order #${orderId} - Kisan SuperMall`,
                 html: reminderHtml,
-                attachments: [{
-                    filename: 'WebsiteLogo.png',
-                    path: path.join(__dirname, '../assets/WebsiteLogo.png'),
-                    cid: 'websitelogo',
-                    contentDisposition: 'inline'
-                }]
-            }, (error) => {
-                if (error) console.error('Error sending 5-min reminder email:', error);
+                attachments: getLogoAttachment()
             });
         } catch (err) {
             console.error('5-min reminder job error:', err);
@@ -114,7 +128,7 @@ router.post('/send-register-otp', async (req, res) => {
         if (user) return res.status(400).json({ message: 'User already exists' });
 
         const otp = generateOTP();
-        
+
         const htmlTemplate = `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8fafc; padding: 30px; border-radius: 12px; border: 1px solid #e2e8f0;">
             <div style="text-align: center; margin-bottom: 25px;">
@@ -127,25 +141,19 @@ router.post('/send-register-otp', async (req, res) => {
             </div>
         </div>`;
 
-        transporter.sendMail({
+        await transporter.sendMail({
             from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
-            to: email, 
-            subject: 'Registration Verification Code', 
+            to: email,
+            subject: 'Registration Verification Code',
             html: htmlTemplate,
-            attachments: [{
-                filename: 'WebsiteLogo.png',
-                path: path.join(__dirname, '../assets/WebsiteLogo.png'),
-                cid: 'websitelogo',
-                contentDisposition: 'inline'
-            }]
-        }, (error) => {
-            if (error) {
-                console.error('OTP Email Error:', error);
-                return res.status(500).json({ message: 'Error sending email' });
-            }
-            res.json({ message: 'OTP sent', otp }); 
+            attachments: getLogoAttachment()
         });
-    } catch (err) { res.status(500).json({ message: 'Server error' }); }
+
+        res.json({ message: 'OTP sent', otp });
+    } catch (err) {
+        console.error('OTP Email Error:', err);
+        res.status(500).json({ message: 'Error sending email' });
+    }
 });
 
 router.post('/register', async (req, res) => {
@@ -169,14 +177,14 @@ router.post('/login', loginLimiter, async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             user.loginAttempts += 1;
-            if (user.loginAttempts >= 3) user.lockUntil = Date.now() + 15 * 60 * 1000; 
+            if (user.loginAttempts >= 3) user.lockUntil = Date.now() + 15 * 60 * 1000;
             await user.save();
             return res.status(400).json({ message: 'Invalid credentials' });
         }
 
         user.loginAttempts = 0; user.lockUntil = undefined; await user.save();
         const token = jwt.sign({ email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ message: 'Login successful', token, user }); 
+        res.json({ message: 'Login successful', token, user });
     } catch (err) { res.status(500).json({ message: 'Server error' }); }
 });
 
@@ -212,7 +220,7 @@ router.delete('/account', async (req, res) => {
     try {
         const { email } = req.body;
         await User.findOneAndDelete({ email });
-        await Order.deleteMany({ userEmail: email }); 
+        await Order.deleteMany({ userEmail: email });
         await Wishlist.deleteOne({ userEmail: email });
         res.status(200).json({ message: 'Account deleted' });
     } catch (err) { res.status(500).json({ message: 'Server error' }); }
@@ -269,7 +277,7 @@ router.post('/razorpay/verify-payment', async (req, res) => {
 });
 
 // ==========================================
-// Orders Route (With Invoice Button + 5-Min Reminder)
+// Orders Route (Awaited Invoice Email for Vercel)
 // ==========================================
 router.post('/orders', async (req, res) => {
     try {
@@ -300,7 +308,7 @@ router.post('/orders', async (req, res) => {
             return res.status(200).json({ message: 'Order already recorded', order: existingOrder });
         }
 
-        const newOrder = new Order({ 
+        const newOrder = new Order({
             userEmail,
             orderId,
             items,
@@ -377,26 +385,24 @@ router.post('/orders', async (req, res) => {
                     
                     <p style="text-align: center; margin: 20px 0 0; font-size: 13px; color: #64748b; line-height: 1.5;">
                         Thank you for shopping with us!<br/>
-                        We will also notify you when your order is 5 minutes away.
+                        Track your order live anytime using the button above.
                     </p>
                 </div>
             </div>
         </div>`;
 
-        transporter.sendMail({
-            from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
-            to: userEmail, 
-            subject: `Order Invoice #${orderId} - Kisan SuperMall`, 
-            html: emailHtml,
-            attachments: [{
-                filename: 'WebsiteLogo.png',
-                path: path.join(__dirname, '../assets/WebsiteLogo.png'),
-                cid: 'websitelogo',
-                contentDisposition: 'inline'
-            }]
-        }, (error) => {
-            if (error) console.error('Background Error sending invoice email:', error);
-        });
+        // Await email send so Vercel serverless doesn't terminate it early
+        try {
+            await transporter.sendMail({
+                from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
+                to: userEmail,
+                subject: `Order Invoice #${orderId} - Kisan SuperMall`,
+                html: emailHtml,
+                attachments: getLogoAttachment()
+            });
+        } catch (emailErr) {
+            console.error('Invoice Email Error:', emailErr);
+        }
 
         scheduleFiveMinReminder({
             userEmail,
@@ -408,9 +414,9 @@ router.post('/orders', async (req, res) => {
         });
 
         res.status(201).json({ message: 'Order created successfully', order: newOrder });
-    } catch (err) { 
+    } catch (err) {
         console.error("Order Creation Error:", err);
-        res.status(500).json({ message: 'Server error creating order' }); 
+        res.status(500).json({ message: 'Server error creating order' });
     }
 });
 
@@ -469,14 +475,14 @@ router.post('/wishlist', async (req, res) => {
     try {
         const { userEmail, items } = req.body;
         let wishlist = await Wishlist.findOne({ userEmail });
-        
+
         if (wishlist) {
             wishlist.items = items;
             wishlist.updatedAt = Date.now();
         } else {
             wishlist = new Wishlist({ userEmail, items });
         }
-        
+
         await wishlist.save();
         res.status(200).json({ message: 'Wishlist synced successfully', wishlist: wishlist.items });
     } catch (err) { res.status(500).json({ message: 'Server error syncing wishlist' }); }
