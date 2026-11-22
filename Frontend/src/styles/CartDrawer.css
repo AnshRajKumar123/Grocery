@@ -1,0 +1,310 @@
+/* ============================================================
+   SLIDE-OVER CART DRAWER - DBU GROCERY SUPERMALL
+   Pure External CSS (Zero Inline Styling)
+   ============================================================ */
+
+/* Dimmed Backdrop */
+.cart-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(4px);
+    z-index: 2000;
+    display: flex;
+    justify-content: flex-end;
+    animation: fadeInBackdrop 0.2s ease-out;
+}
+
+@keyframes fadeInBackdrop {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* Sliding Panel */
+.cart-drawer-panel {
+    width: 100%;
+    max-width: 440px;
+    background: #ffffff;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
+    animation: slideDrawer 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDrawer {
+    from {
+        transform: translateX(100%);
+    }
+
+    to {
+        transform: translateX(0);
+    }
+}
+
+/* Header */
+.cart-drawer-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f8fafc;
+}
+
+.cart-header-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cart-header-title h3 {
+    font-size: 18px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0;
+}
+
+.cart-items-pill {
+    background: #0f172a;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.btn-close-drawer {
+    background: transparent;
+    color: var(--text-muted);
+    padding: 6px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.btn-close-drawer:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+/* Empty State */
+.cart-empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 24px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.cart-empty-icon-wrap {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: #f1f5f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    color: #94a3b8;
+}
+
+.cart-empty-state h4 {
+    font-size: 18px;
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 6px;
+}
+
+.cart-empty-state p {
+    font-size: 13.5px;
+    max-width: 280px;
+    line-height: 1.5;
+}
+
+/* Items List */
+.cart-items-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.cart-item-card {
+    display: flex;
+    gap: 14px;
+    padding: 12px;
+    background: #f8fafc;
+    border: 1px solid var(--border-light);
+    border-radius: 14px;
+}
+
+.cart-item-thumb {
+    width: 74px;
+    height: 74px;
+    border-radius: 10px;
+    object-fit: cover;
+    background: #ffffff;
+    border: 1px solid var(--border-light);
+    flex-shrink: 0;
+}
+
+.cart-item-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+}
+
+.cart-item-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.cart-item-title-row h5 {
+    font-size: 13.5px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.btn-remove-item {
+    background: transparent;
+    color: #94a3b8;
+    padding: 2px;
+    border-radius: 4px;
+    transition: var(--transition);
+}
+
+.btn-remove-item:hover {
+    color: #ef4444;
+}
+
+.cart-item-meta {
+    font-size: 11.5px;
+    color: var(--text-muted);
+}
+
+.cart-item-bottom-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.cart-item-stepper {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.cart-item-stepper button {
+    padding: 4px 9px;
+    background: transparent;
+    color: #0f172a;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.cart-item-stepper span {
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+.cart-item-total-price {
+    font-size: 14px;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+/* Footer & Summary */
+.cart-drawer-footer {
+    padding: 20px 24px;
+    border-top: 1px solid var(--border-light);
+    background: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cart-summary-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.cart-summary-line.total {
+    font-size: 17px;
+    font-weight: 800;
+    color: #0f172a;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-light);
+}
+
+.free-delivery-badge {
+    color: #16a34a;
+    font-weight: 800;
+}
+
+.btn-checkout-now {
+    padding: 14px 20px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 800;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: var(--transition);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+/* Department Themed Checkout Buttons */
+.theme-fertilizer .btn-checkout-now {
+    background: var(--farm-emerald);
+}
+
+.theme-fertilizer .btn-checkout-now:hover {
+    background: var(--farm-slate);
+}
+
+.theme-kirana .btn-checkout-now {
+    background: var(--kirana-orange);
+}
+
+.theme-kirana .btn-checkout-now:hover {
+    background: var(--kirana-orange-hover);
+}
+
+.theme-beauty .btn-checkout-now {
+    background: var(--beauty-crimson);
+}
+
+.theme-beauty .btn-checkout-now:hover {
+    background: var(--beauty-obsidian);
+}
