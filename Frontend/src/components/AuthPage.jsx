@@ -20,6 +20,7 @@ export default function AuthPage({ onLoginSuccess, onBackToStore }) {
 
     const [signInEmail, setSignInEmail] = useState("");
     const [signInPassword, setSignInPassword] = useState("");
+    const [loginNotice, setLoginNotice] = useState("");
 
     const [otp, setOtp] = useState("");
     const [generatedOtp, setGeneratedOtp] = useState("");
@@ -33,15 +34,25 @@ export default function AuthPage({ onLoginSuccess, onBackToStore }) {
     const [regPhone, setRegPhone] = useState("");
     const [regPassword, setRegPassword] = useState("");
 
+    // Refresh login attempt/lockout state whenever opening or switching to Sign In
     useEffect(() => {
-        let interval = null;
-        if (lockoutTimer > 0) {
-            interval = setInterval(() => {
-                setLockoutTimer((prev) => prev - 1);
-            }, 1000);
-        } else if (lockoutTimer === 0) {
-            clearInterval(interval);
+        if (authMode === "signin") {
+            setLockoutTimer(0);
+            setLoginNotice("");
         }
+    }, [authMode]);
+
+    useEffect(() => {
+        if (lockoutTimer <= 0) return;
+        const interval = setInterval(() => {
+            setLockoutTimer((prev) => {
+                if (prev <= 1) {
+                    setLoginNotice("");
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
         return () => clearInterval(interval);
     }, [lockoutTimer]);
 
@@ -59,24 +70,28 @@ export default function AuthPage({ onLoginSuccess, onBackToStore }) {
         if (lockoutTimer > 0 || isSubmitting) return;
 
         if (!signInEmail || !signInPassword) {
-            alert("Please provide both email and password.");
+            setLoginNotice("Please provide both email and password.");
             return;
         }
 
         setIsSubmitting(true);
+        setLoginNotice("");
         try {
             const response = await apiService.login(signInEmail, signInPassword);
 
             if (response.ok) {
+                setLockoutTimer(0);
+                setLoginNotice("");
                 onLoginSuccess(response.data.user, response.data.token);
             } else {
+                const msg = response.data.message || "Login failed";
+                setLoginNotice(msg);
                 if (response.status === 429 || response.status === 403) {
                     setLockoutTimer(900); // 15 mins
                 }
-                alert(response.data.message || "Login failed");
             }
         } catch (error) {
-            alert("An error occurred during login. Please check server.");
+            setLoginNotice("An error occurred during login. Please check server.");
         } finally {
             setIsSubmitting(false);
         }
@@ -91,6 +106,11 @@ export default function AuthPage({ onLoginSuccess, onBackToStore }) {
 
         if (!regName || !regEmail || !regPhone || !regPassword) {
             alert("Please fill in all registration fields.");
+            return;
+        }
+
+        if (!/^\d{10}$/.test(regPhone)) {
+            alert("Mobile number must be exactly 10 digits.");
             return;
         }
 
@@ -114,6 +134,11 @@ export default function AuthPage({ onLoginSuccess, onBackToStore }) {
         e.preventDefault();
         if (isSubmitting) return;
 
+        if (!/^\d{10}$/.test(regPhone)) {
+            alert("Mobile number must be exactly 10 digits.");
+            return;
+        }
+
         if (otp !== generatedOtp.toString()) {
             alert("Invalid OTP Code. Please check your email.");
             return;
@@ -130,6 +155,7 @@ export default function AuthPage({ onLoginSuccess, onBackToStore }) {
             if (response.ok) {
                 alert("Account created successfully! Please log in.");
                 setOtp("");
+                setRegPhone("");
                 setAuthMode("signin");
                 setSignUpStep(1);
             } else {
@@ -163,8 +189,8 @@ export default function AuthPage({ onLoginSuccess, onBackToStore }) {
                         {authMode === "signin"
                             ? "Sign in to access your saved addresses & orders"
                             : signUpStep === 1
-                            ? "Create an account for quick checkout & order tracking"
-                            : "Verify Email Address"}
+                                ? "Create an account for quick checkout & order tracking"
+                                : "Verify Email Address"}
                     </p>
                 </div>
 
@@ -201,6 +227,22 @@ export default function AuthPage({ onLoginSuccess, onBackToStore }) {
                 {/* ========================================== */}
                 {authMode === "signin" ? (
                     <form onSubmit={handleSignIn} className="auth-form-cluster">
+                        {loginNotice && (
+                            <div
+                                style={{
+                                    background: "#fef2f2",
+                                    color: "#b91c1c",
+                                    border: "1px solid #fecaca",
+                                    borderRadius: 10,
+                                    padding: "10px 12px",
+                                    fontSize: 12.5,
+                                    fontWeight: 700
+                                }}
+                            >
+                                {loginNotice}
+                            </div>
+                        )}
+
                         <div className="input-field-group">
                             <label>Email Address</label>
                             <div className="input-wrapper">
@@ -301,9 +343,13 @@ export default function AuthPage({ onLoginSuccess, onBackToStore }) {
                                 <Phone size={16} className="field-icon" />
                                 <input
                                     type="tel"
+                                    inputMode="numeric"
+                                    pattern="\d{10}"
                                     placeholder="10-digit number"
                                     value={regPhone}
-                                    onChange={(e) => setRegPhone(e.target.value)}
+                                    onChange={(e) => setRegPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                                    minLength="10"
+                                    maxLength="10"
                                     autoComplete="tel"
                                     disabled={isSubmitting}
                                     required

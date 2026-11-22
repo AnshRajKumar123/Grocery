@@ -15,12 +15,13 @@ const crypto = require('crypto');
 
 const JWT_SECRET = process.env.JWT_SECRET || "KISAN_SUPERMALL_SECRET_KEY_1020";
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
+const MAX_LOGIN_ATTEMPTS = 5;
 
-// Rate Limiter for Login
+// Rate Limiter for Login (5 attempts per 15 minutes per IP)
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 3,
-    message: { message: "Account locked due to too many attempts. Please try again after 15 minutes." }
+    max: MAX_LOGIN_ATTEMPTS,
+    message: { message: "Too many login attempts. Please try again after 15 minutes." }
 });
 
 // Mail Transporter Setup (Gmail 2-Step App Password)
@@ -159,6 +160,9 @@ router.post('/send-register-otp', async (req, res) => {
 router.post('/register', async (req, res) => {
     try {
         const { name, email, phone, password } = req.body;
+        if (!/^\d{10}$/.test(String(phone || ""))) {
+            return res.status(400).json({ message: 'Mobile number must be exactly 10 digits.' });
+        }
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
         const user = new User({ name, email, phone, password: hashedPassword });
@@ -172,17 +176,50 @@ router.post('/login', loginLimiter, async (req, res) => {
         const { email, password } = req.body;
         const user = await User.findOne({ email });
         if (!user) return res.status(400).json({ message: 'Invalid credentials' });
-        if (user.lockUntil && user.lockUntil > Date.now()) return res.status(403).json({ message: 'Account locked.' });
+
+        if (user.lockUntil && user.lockUntil > Date.now()) {
+            const remainingMins = Math.ceil((user.lockUntil - Date.now()) / 60000);
+            return res.status(403).json({
+                message: `Account locked due to too many failed attempts. Try again in ${remainingMins} minute(s).`
+            });
+        }
+
+        // If a previous lock expired, reset attempts cleanly
+        if (user.lockUntil && user.lockUntil <= Date.now()) {
+            user.loginAttempts = 0;
+            user.lockUntil = undefined;
+        }
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            user.loginAttempts += 1;
-            if (user.loginAttempts >= 3) user.lockUntil = Date.now() + 15 * 60 * 1000;
+            user.loginAttempts = (user.loginAttempts || 0) + 1;
+
+            if (user.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+                user.lockUntil = Date.now() + 15 * 60 * 1000;
+                await user.save();
+                return res.status(403).json({
+                    message: 'Account locked due to 5 failed attempts. Please try again after 15 minutes.'
+                });
+            }
+
             await user.save();
-            return res.status(400).json({ message: 'Invalid credentials' });
+
+            if (user.loginAttempts === MAX_LOGIN_ATTEMPTS - 1) {
+                return res.status(400).json({
+                    message: 'Invalid credentials. You have only one chance left before your account is locked for 15 minutes!'
+                });
+            }
+
+            const attemptsLeft = MAX_LOGIN_ATTEMPTS - user.loginAttempts;
+            return res.status(400).json({
+                message: `Invalid credentials. ${attemptsLeft} attempts remaining.`
+            });
         }
 
-        user.loginAttempts = 0; user.lockUntil = undefined; await user.save();
+        user.loginAttempts = 0;
+        user.lockUntil = undefined;
+        await user.save();
+
         const token = jwt.sign({ email: user.email }, JWT_SECRET, { expiresIn: '7d' });
         res.json({ message: 'Login successful', token, user });
     } catch (err) { res.status(500).json({ message: 'Server error' }); }
@@ -391,7 +428,6 @@ router.post('/orders', async (req, res) => {
             </div>
         </div>`;
 
-        // Await email send so Vercel serverless doesn't terminate it early
         try {
             await transporter.sendMail({
                 from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
