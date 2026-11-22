@@ -1,10 +1,12 @@
 require('dotenv').config();
 const express = require('express');
 const router = express.Router();
+const path = require('path');
 const User = require('../models/User');
 const Order = require('../models/Order');
 const Wishlist = require('../models/Wishlist');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const Razorpay = require('razorpay');
@@ -12,13 +14,18 @@ const crypto = require('crypto');
 
 const JWT_SECRET = process.env.JWT_SECRET || "KISAN_SUPERMALL_SECRET_KEY_1020";
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
-const LOGO_URL = `${FRONTEND_URL}/WebsiteLogo.png`;
 
 // Rate Limiter for Login
 const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 3,
+    windowMs: 15 * 60 * 1000, 
+    max: 3, 
     message: { message: "Account locked due to too many attempts. Please try again after 15 minutes." }
+});
+
+// Mail Transporter Setup
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
 });
 
 // Razorpay Instance
@@ -28,33 +35,6 @@ const razorpay = new Razorpay({
 });
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-// ==========================================
-// Helper: Send Email via Brevo HTTPS API
-// ==========================================
-const sendEmail = async ({ to, subject, html }) => {
-    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-            'accept': 'application/json',
-            'api-key': process.env.BREVO_API_KEY,
-            'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-            sender: { name: 'Kisan SuperMall', email: process.env.EMAIL_USER },
-            to: [{ email: to }],
-            subject,
-            htmlContent: html
-        })
-    });
-
-    if (!response.ok) {
-        const errData = await response.text();
-        throw new Error(`Brevo API Error (${response.status}): ${errData}`);
-    }
-
-    return response.json();
-};
 
 // ==========================================
 // Helper: Schedule 5-Minute Arrival Reminder
@@ -84,7 +64,7 @@ const scheduleFiveMinReminder = ({ userEmail, orderId, deliveryType, scheduledDa
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8fafc; padding: 20px;">
                 <div style="background-color: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
                     <div style="background-color: #0f172a; padding: 28px 20px; text-align: center;">
-                        <img src="${LOGO_URL}" alt="Kisan SuperMall Logo" style="width: 60px; height: 60px; border-radius: 12px; object-fit: cover; margin-bottom: 12px;" />
+                        <img src="cid:websitelogo" alt="Kisan SuperMall Logo" style="width: 60px; height: 60px; border-radius: 12px; object-fit: cover; margin-bottom: 12px;" />
                         <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 900;">Arriving in 5 Minutes!</h1>
                         <p style="color: #4ade80; margin: 8px 0 0; font-size: 14px; font-weight: 700;">Your Kisan SuperMall order is almost at your doorstep</p>
                     </div>
@@ -104,10 +84,19 @@ const scheduleFiveMinReminder = ({ userEmail, orderId, deliveryType, scheduledDa
                 </div>
             </div>`;
 
-            await sendEmail({
+            transporter.sendMail({
+                from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
                 to: userEmail,
                 subject: `Arriving in 5 Mins! Order #${orderId} - Kisan SuperMall`,
-                html: reminderHtml
+                html: reminderHtml,
+                attachments: [{
+                    filename: 'WebsiteLogo.png',
+                    path: path.join(__dirname, '../assets/WebsiteLogo.png'),
+                    cid: 'websitelogo',
+                    contentDisposition: 'inline'
+                }]
+            }, (error) => {
+                if (error) console.error('Error sending 5-min reminder email:', error);
             });
         } catch (err) {
             console.error('5-min reminder job error:', err);
@@ -125,11 +114,11 @@ router.post('/send-register-otp', async (req, res) => {
         if (user) return res.status(400).json({ message: 'User already exists' });
 
         const otp = generateOTP();
-
+        
         const htmlTemplate = `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8fafc; padding: 30px; border-radius: 12px; border: 1px solid #e2e8f0;">
             <div style="text-align: center; margin-bottom: 25px;">
-                <img src="${LOGO_URL}" alt="Kisan SuperMall Logo" style="width: 72px; height: 72px; border-radius: 14px; object-fit: cover; margin-bottom: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);" />
+                <img src="cid:websitelogo" alt="Kisan SuperMall Logo" style="width: 72px; height: 72px; border-radius: 14px; object-fit: cover; margin-bottom: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);" />
                 <h1 style="color: #0f172a; margin: 0 0 5px; font-size: 24px; font-weight: 800;">Kisan SuperMall</h1>
             </div>
             <div style="background-color: #ffffff; padding: 40px 30px; border-radius: 16px; text-align: center;">
@@ -138,17 +127,25 @@ router.post('/send-register-otp', async (req, res) => {
             </div>
         </div>`;
 
-        await sendEmail({
-            to: email,
-            subject: 'Registration Verification Code',
-            html: htmlTemplate
+        transporter.sendMail({
+            from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
+            to: email, 
+            subject: 'Registration Verification Code', 
+            html: htmlTemplate,
+            attachments: [{
+                filename: 'WebsiteLogo.png',
+                path: path.join(__dirname, '../assets/WebsiteLogo.png'),
+                cid: 'websitelogo',
+                contentDisposition: 'inline'
+            }]
+        }, (error) => {
+            if (error) {
+                console.error('OTP Email Error:', error);
+                return res.status(500).json({ message: 'Error sending email' });
+            }
+            res.json({ message: 'OTP sent', otp }); 
         });
-
-        res.json({ message: 'OTP sent', otp });
-    } catch (err) {
-        console.error('OTP Email Error:', err);
-        res.status(500).json({ message: 'Error sending email' });
-    }
+    } catch (err) { res.status(500).json({ message: 'Server error' }); }
 });
 
 router.post('/register', async (req, res) => {
@@ -172,14 +169,14 @@ router.post('/login', loginLimiter, async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             user.loginAttempts += 1;
-            if (user.loginAttempts >= 3) user.lockUntil = Date.now() + 15 * 60 * 1000;
+            if (user.loginAttempts >= 3) user.lockUntil = Date.now() + 15 * 60 * 1000; 
             await user.save();
             return res.status(400).json({ message: 'Invalid credentials' });
         }
 
         user.loginAttempts = 0; user.lockUntil = undefined; await user.save();
         const token = jwt.sign({ email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ message: 'Login successful', token, user });
+        res.json({ message: 'Login successful', token, user }); 
     } catch (err) { res.status(500).json({ message: 'Server error' }); }
 });
 
@@ -215,7 +212,7 @@ router.delete('/account', async (req, res) => {
     try {
         const { email } = req.body;
         await User.findOneAndDelete({ email });
-        await Order.deleteMany({ userEmail: email });
+        await Order.deleteMany({ userEmail: email }); 
         await Wishlist.deleteOne({ userEmail: email });
         res.status(200).json({ message: 'Account deleted' });
     } catch (err) { res.status(500).json({ message: 'Server error' }); }
@@ -303,7 +300,7 @@ router.post('/orders', async (req, res) => {
             return res.status(200).json({ message: 'Order already recorded', order: existingOrder });
         }
 
-        const newOrder = new Order({
+        const newOrder = new Order({ 
             userEmail,
             orderId,
             items,
@@ -339,7 +336,7 @@ router.post('/orders', async (req, res) => {
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8fafc; padding: 20px;">
             <div style="background-color: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
                 <div style="background-color: #0f172a; padding: 30px 20px; text-align: center;">
-                    <img src="${LOGO_URL}" alt="Kisan SuperMall Logo" style="width: 64px; height: 64px; border-radius: 12px; object-fit: cover; margin-bottom: 14px;" />
+                    <img src="cid:websitelogo" alt="Kisan SuperMall Logo" style="width: 64px; height: 64px; border-radius: 12px; object-fit: cover; margin-bottom: 14px;" />
                     <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.5px;">Kisan SuperMall</h1>
                     <p style="color: #94a3b8; margin: 8px 0 0; font-size: 14px;">Order Confirmed Successfully!</p>
                 </div>
@@ -372,7 +369,6 @@ router.post('/orders', async (req, res) => {
                         </div>
                     </div>
 
-                    <!-- Track Your Order Button -->
                     <div style="text-align: center; margin-top: 28px;">
                         <a href="${trackUrl}" target="_blank" style="display: inline-block; background-color: #16a34a; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 15px; padding: 14px 28px; border-radius: 12px;">
                             Track Your Order
@@ -387,14 +383,21 @@ router.post('/orders', async (req, res) => {
             </div>
         </div>`;
 
-        // 1. Send Invoice Email Immediately (Background)
-        sendEmail({
-            to: userEmail,
-            subject: `Order Invoice #${orderId} - Kisan SuperMall`,
-            html: emailHtml
-        }).catch((error) => console.error('Background Error sending invoice email:', error));
+        transporter.sendMail({
+            from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
+            to: userEmail, 
+            subject: `Order Invoice #${orderId} - Kisan SuperMall`, 
+            html: emailHtml,
+            attachments: [{
+                filename: 'WebsiteLogo.png',
+                path: path.join(__dirname, '../assets/WebsiteLogo.png'),
+                cid: 'websitelogo',
+                contentDisposition: 'inline'
+            }]
+        }, (error) => {
+            if (error) console.error('Background Error sending invoice email:', error);
+        });
 
-        // 2. Schedule 5-Minute Arrival Reminder Email
         scheduleFiveMinReminder({
             userEmail,
             orderId,
@@ -405,9 +408,9 @@ router.post('/orders', async (req, res) => {
         });
 
         res.status(201).json({ message: 'Order created successfully', order: newOrder });
-    } catch (err) {
+    } catch (err) { 
         console.error("Order Creation Error:", err);
-        res.status(500).json({ message: 'Server error creating order' });
+        res.status(500).json({ message: 'Server error creating order' }); 
     }
 });
 
@@ -466,14 +469,14 @@ router.post('/wishlist', async (req, res) => {
     try {
         const { userEmail, items } = req.body;
         let wishlist = await Wishlist.findOne({ userEmail });
-
+        
         if (wishlist) {
             wishlist.items = items;
             wishlist.updatedAt = Date.now();
         } else {
             wishlist = new Wishlist({ userEmail, items });
         }
-
+        
         await wishlist.save();
         res.status(200).json({ message: 'Wishlist synced successfully', wishlist: wishlist.items });
     } catch (err) { res.status(500).json({ message: 'Server error syncing wishlist' }); }
