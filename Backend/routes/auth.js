@@ -13,6 +13,7 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 
 const JWT_SECRET = process.env.JWT_SECRET || "KISAN_SUPERMALL_SECRET_KEY_1020";
+const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
 
 // Rate Limiter for Login
 const loginLimiter = rateLimit({
@@ -34,6 +35,76 @@ const razorpay = new Razorpay({
 });
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+// ==========================================
+// Helper: Schedule 5-Minute Arrival Reminder
+// ==========================================
+const scheduleFiveMinReminder = ({ userEmail, orderId, deliveryType, scheduledDate, scheduledTime, trackUrl }) => {
+    let delayMs = 30 * 60 * 1000; // Standard (35 mins total -> alert at 30 mins)
+
+    if (deliveryType === 'Fast') {
+        delayMs = 20 * 60 * 1000; // Fast (25 mins total -> alert at 20 mins)
+    } else if (deliveryType === 'Schedule' && scheduledDate && scheduledTime) {
+        const targetTime = new Date(`${scheduledDate}T${scheduledTime}`).getTime();
+        if (!isNaN(targetTime)) {
+            delayMs = targetTime - Date.now() - (5 * 60 * 1000);
+        }
+    }
+
+    // Only schedule if delay is positive and within Node's 32-bit timer limit
+    if (delayMs <= 0 || delayMs > 2147483647) return;
+
+    setTimeout(async () => {
+        try {
+            // Re-check DB to make sure order wasn't cancelled or already delivered
+            const latestOrder = await Order.findOne({ orderId: String(orderId) });
+            if (!latestOrder || latestOrder.status === 'Cancelled' || latestOrder.status === 'Delivered') {
+                return;
+            }
+
+            const reminderHtml = `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8fafc; padding: 20px;">
+                <div style="background-color: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                    <div style="background-color: #0f172a; padding: 28px 20px; text-align: center;">
+                        <img src="cid:websitelogo" alt="Kisan SuperMall Logo" style="width: 60px; height: 60px; border-radius: 12px; object-fit: cover; margin-bottom: 12px;" />
+                        <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 900;">Arriving in 5 Minutes!</h1>
+                        <p style="color: #4ade80; margin: 8px 0 0; font-size: 14px; font-weight: 700;">Your Kisan SuperMall order is almost at your doorstep</p>
+                    </div>
+
+                    <div style="padding: 30px 24px; text-align: center;">
+                        <p style="margin: 0 0 8px; font-size: 13px; color: #64748b; text-transform: uppercase; font-weight: 700;">Order ID</p>
+                        <h2 style="margin: 0 0 16px; font-size: 22px; color: #0f172a; font-weight: 800;">#${orderId}</h2>
+
+                        <p style="font-size: 15px; color: #334155; line-height: 1.6; margin: 0 0 26px;">
+                            Our delivery partner is just <strong>5 minutes away</strong> from your delivery address. Please keep your phone handy!
+                        </p>
+
+                        <a href="${trackUrl}" target="_blank" style="display: inline-block; background-color: #16a34a; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 15px; padding: 14px 28px; border-radius: 12px;">
+                            Track Your Order Live
+                        </a>
+                    </div>
+                </div>
+            </div>`;
+
+            transporter.sendMail({
+                from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
+                to: userEmail,
+                subject: `Arriving in 5 Mins! Order #${orderId} - Kisan SuperMall`,
+                html: reminderHtml,
+                attachments: [{
+                    filename: 'WebsiteLogo.png',
+                    path: path.join(__dirname, '../assets/WebsiteLogo.png'),
+                    cid: 'websitelogo',
+                    contentDisposition: 'inline'
+                }]
+            }, (error) => {
+                if (error) console.error('Error sending 5-min reminder email:', error);
+            });
+        } catch (err) {
+            console.error('5-min reminder job error:', err);
+        }
+    }, delayMs);
+};
 
 // ==========================================
 // OTP Verification Route
@@ -157,7 +228,7 @@ router.post('/razorpay/create-order', async (req, res) => {
         }
 
         const options = {
-            amount: Math.round(amount * 100), // Razorpay expects paise
+            amount: Math.round(amount * 100),
             currency: 'INR',
             receipt: 'ksm_rcpt_' + Date.now()
         };
@@ -197,7 +268,7 @@ router.post('/razorpay/verify-payment', async (req, res) => {
 });
 
 // ==========================================
-// Orders Route (With Duplicate Guard)
+// Orders Route (With Invoice Button + 5-Min Reminder)
 // ==========================================
 router.post('/orders', async (req, res) => {
     try {
@@ -247,6 +318,8 @@ router.post('/orders', async (req, res) => {
         });
         await newOrder.save();
 
+        const trackUrl = `${FRONTEND_URL}/track/${orderId}`;
+
         const itemsHtml = items.map(item => `
             <tr>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0; text-align: left;">
@@ -295,15 +368,23 @@ router.post('/orders', async (req, res) => {
                             <div style="clear: both;"></div>
                         </div>
                     </div>
+
+                    <!-- Track Your Order Button -->
+                    <div style="text-align: center; margin-top: 28px;">
+                        <a href="${trackUrl}" target="_blank" style="display: inline-block; background-color: #16a34a; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 15px; padding: 14px 28px; border-radius: 12px;">
+                            Track Your Order
+                        </a>
+                    </div>
                     
-                    <p style="text-align: center; margin: 24px 0 0; font-size: 13px; color: #64748b; line-height: 1.5;">
+                    <p style="text-align: center; margin: 20px 0 0; font-size: 13px; color: #64748b; line-height: 1.5;">
                         Thank you for shopping with us!<br/>
-                        Track your order live in your account dashboard.
+                        We will also notify you when your order is 5 minutes away.
                     </p>
                 </div>
             </div>
         </div>`;
 
+        // 1. Send Invoice Email Immediately
         transporter.sendMail({
             from: `Kisan SuperMall <${process.env.EMAIL_USER}>`,
             to: userEmail, 
@@ -317,6 +398,16 @@ router.post('/orders', async (req, res) => {
             }]
         }, (error) => {
             if (error) console.error('Background Error sending invoice email:', error);
+        });
+
+        // 2. Schedule 5-Minute Arrival Reminder Email
+        scheduleFiveMinReminder({
+            userEmail,
+            orderId,
+            deliveryType,
+            scheduledDate,
+            scheduledTime,
+            trackUrl
         });
 
         res.status(201).json({ message: 'Order created successfully', order: newOrder });
